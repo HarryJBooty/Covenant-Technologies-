@@ -433,15 +433,14 @@ class ReportDuelButton(ui.Button):
         )
     
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            embed=create_styled_embed(
-                "⚔️ Report Duel Result",
-                "Use the command: `!report_duel @winner @loser`\n\n"
-                "Example: `!report_duel @John @Jane`",
-                UIStyle.COLOR_INFO
-            ),
-            ephemeral=True
+        await interaction.response.defer()
+        view = DuelReportView(interaction)
+        embed = create_styled_embed(
+            "⚔️ Report Duel Result",
+            "Select the winner and loser from the dropdowns below:",
+            UIStyle.COLOR_PRIMARY
         )
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 class ChallengeButton(ui.Button):
@@ -454,16 +453,14 @@ class ChallengeButton(ui.Button):
         )
     
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            embed=create_styled_embed(
-                "⚔️ Challenge a Player",
-                "Use the command: `!challenge @opponent`\n\n"
-                "Example: `!challenge @PlayerName`\n\n"
-                "They will receive a notification to accept or decline!",
-                UIStyle.COLOR_INFO
-            ),
-            ephemeral=True
+        await interaction.response.defer()
+        view = ChallengeSelectView(interaction)
+        embed = create_styled_embed(
+            "⚔️ Challenge a Player",
+            "Select the player you want to challenge from the dropdown below:",
+            UIStyle.COLOR_PRIMARY
         )
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 class ProgressButton(ui.Button):
@@ -730,6 +727,265 @@ class AttendeeSelect(ui.UserSelect):
         )
 
 
+class ChallengeSelectView(ui.View):
+    """Select opponent for challenge"""
+    
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__(timeout=180)
+        self.interaction = interaction
+        self.add_item(OpponentSelect())
+    
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.interaction.user.id
+
+
+class OpponentSelect(ui.UserSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Select opponent to challenge...",
+            min_values=1,
+            max_values=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        opponent = self.values[0]
+        challenger = interaction.user
+        
+        if opponent.bot:
+            await interaction.response.send_message(
+                embed=create_styled_embed(
+                    "Invalid Target",
+                    "You cannot challenge a bot!",
+                    UIStyle.COLOR_ERROR
+                ),
+                ephemeral=True
+            )
+            return
+
+        if opponent.id == challenger.id:
+            await interaction.response.send_message(
+                embed=create_styled_embed(
+                    "Invalid Target",
+                    "You cannot challenge yourself!",
+                    UIStyle.COLOR_ERROR
+                ),
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        # Send challenge to the channel
+        channel = interaction.channel
+        
+        def response_check(m: discord.Message):
+            return (
+                m.author.id == opponent.id
+                and m.channel == channel
+                and m.content.lower() in ("yes", "no", "y", "n", "accept", "decline")
+            )
+
+        challenge_embed = create_styled_embed(
+            "⚔️ Duel Challenge!",
+            f"{opponent.mention}, you have been challenged to a duel by {challenger.mention}!\n\n"
+            "**Respond with:**\n"
+            "• `yes` or `accept` to accept the challenge\n"
+            "• `no` or `decline` to decline\n\n"
+            f"⏱️ You have 60 seconds to respond...",
+            UIStyle.COLOR_WARNING
+        )
+        challenge_embed.set_thumbnail(url=challenger.display_avatar.url if challenger.display_avatar else None)
+        
+        await channel.send(embed=challenge_embed)
+
+        try:
+            reply = await bot.wait_for("message", check=response_check, timeout=60)
+        except asyncio.TimeoutError:
+            timeout_embed = create_styled_embed(
+                "⏱️ Challenge Expired",
+                f"{opponent.mention} did not respond in time.\n\n"
+                f"The duel challenge has been cancelled.",
+                UIStyle.COLOR_ERROR
+            )
+            await channel.send(embed=timeout_embed)
+            return
+
+        answer = reply.content.lower()
+        if answer in ("no", "n", "decline"):
+            declined_embed = create_styled_embed(
+                "❌ Challenge Declined",
+                f"{opponent.mention} has declined the duel challenge.",
+                UIStyle.COLOR_ERROR
+            )
+            await channel.send(embed=declined_embed)
+            return
+
+        # Accepted
+        accepted_embed = create_styled_embed(
+            "✅ Challenge Accepted!",
+            f"{opponent.mention} has accepted the duel!\n\n"
+            "📨 Both players will receive a DM with the duel link.",
+            UIStyle.COLOR_SUCCESS
+        )
+        await channel.send(embed=accepted_embed)
+
+        for user in (challenger, opponent):
+            try:
+                dm = await user.create_dm()
+                dm_embed = create_styled_embed(
+                    "⚔️ Duel Information",
+                    f"**Match:** {challenger.mention} vs {opponent.mention}\n\n"
+                    f"**Duel Link:** {DUEL_PLACEHOLDER_LINK}\n\n"
+                    "Good luck! May the best player win! 🎮",
+                    UIStyle.COLOR_PRIMARY
+                )
+                dm_embed.add_field(
+                    name="📋 After the Duel",
+                    value="An officer will use the menu to report the results.",
+                    inline=False
+                )
+                await dm.send(embed=dm_embed)
+            except Exception:
+                pass
+
+
+class DuelReportView(ui.View):
+    """Report duel results with winner/loser selection"""
+    
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__(timeout=180)
+        self.interaction = interaction
+        self.winner = None
+        self.loser = None
+        
+        self.add_item(WinnerSelect())
+        self.add_item(LoserSelect())
+        
+        submit_btn = ui.Button(label="Submit Result", style=discord.ButtonStyle.success, emoji="✅")
+        submit_btn.callback = self.submit_callback
+        self.add_item(submit_btn)
+    
+    async def submit_callback(self, interaction: discord.Interaction):
+        if not self.winner or not self.loser:
+            await interaction.response.send_message(
+                embed=create_styled_embed(
+                    "Missing Information",
+                    "Please select both winner and loser before submitting.",
+                    UIStyle.COLOR_WARNING
+                ),
+                ephemeral=True
+            )
+            return
+        
+        if self.winner.id == self.loser.id:
+            await interaction.response.send_message(
+                embed=create_styled_embed(
+                    "Invalid Result",
+                    "Winner and loser cannot be the same person!",
+                    UIStyle.COLOR_ERROR
+                ),
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        await log_duel_result(self.winner.id, self.loser.id)
+        
+        result_embed = create_styled_embed(
+            "✅ Duel Result Recorded",
+            f"**Winner:** {self.winner.mention} 🏆\n"
+            f"**Loser:** {self.loser.mention}\n\n"
+            f"Recorded by: {interaction.user.mention}",
+            UIStyle.COLOR_SUCCESS
+        )
+        result_embed.set_thumbnail(url=self.winner.display_avatar.url if self.winner.display_avatar else None)
+        
+        await interaction.channel.send(embed=result_embed)
+        
+        # Notify participants
+        for user, is_winner in [(self.winner, True), (self.loser, False)]:
+            try:
+                dm = await user.create_dm()
+                if is_winner:
+                    dm_embed = create_styled_embed(
+                        "🏆 Duel Victory!",
+                        f"Congratulations! Your duel victory has been recorded.\n\n"
+                        f"**Opponent:** {self.loser.mention}\n"
+                        f"**Recorded by:** {interaction.user.mention}",
+                        UIStyle.COLOR_SUCCESS
+                    )
+                else:
+                    dm_embed = create_styled_embed(
+                        "⚔️ Duel Result",
+                        f"Your duel result has been recorded.\n\n"
+                        f"**Opponent:** {self.winner.mention}\n"
+                        f"**Recorded by:** {interaction.user.mention}",
+                        UIStyle.COLOR_INFO
+                    )
+                await dm.send(embed=dm_embed)
+            except Exception:
+                pass
+        
+        await interaction.followup.send(
+            embed=create_styled_embed(
+                "✅ Complete",
+                "Duel result has been recorded and participants have been notified!",
+                UIStyle.COLOR_SUCCESS
+            ),
+            ephemeral=True
+        )
+    
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.interaction.user.id
+
+
+class WinnerSelect(ui.UserSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Select winner...",
+            min_values=1,
+            max_values=1,
+            row=0
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        view: DuelReportView = self.view
+        view.winner = self.values[0]
+        await interaction.response.send_message(
+            embed=create_styled_embed(
+                "Winner Selected",
+                f"Winner: {view.winner.mention}\n\n"
+                "Now select the loser and click 'Submit Result'.",
+                UIStyle.COLOR_SUCCESS
+            ),
+            ephemeral=True
+        )
+
+
+class LoserSelect(ui.UserSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Select loser...",
+            min_values=1,
+            max_values=1,
+            row=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        view: DuelReportView = self.view
+        view.loser = self.values[0]
+        await interaction.response.send_message(
+            embed=create_styled_embed(
+                "Loser Selected",
+                f"Loser: {view.loser.mention}\n\n"
+                "Click 'Submit Result' to record the duel.",
+                UIStyle.COLOR_SUCCESS
+            ),
+            ephemeral=True
+        )
+
+
 def create_styled_embed(title: str, description: str, color: discord.Color) -> discord.Embed:
     """Create a consistently styled embed"""
     embed = discord.Embed(
@@ -787,43 +1043,35 @@ def create_help_embed() -> discord.Embed:
     )
     
     embed.add_field(
-        name="📋 Log Event (Officers Only)",
-        value="Log raids, defenses, scrims, trainings, and more. "
-              "Select event type, co-host, and attendees through an interactive menu.",
+        name="🏠 Main Menu - `!menu`",
+        value="Opens the interactive menu system where you can access all features:\n"
+              "• Log Events (Officers)\n"
+              "• Report Duels (Officers)\n"
+              "• Challenge Players\n"
+              "• View Progress\n"
+              "• Start Quiz (Minor I)\n\n"
+              "**All major features are accessed through the menu!**",
         inline=False
     )
     
     embed.add_field(
-        name="⚔️ Challenge Player",
-        value="Challenge another player to a duel.\n"
-              "Command: `!challenge @opponent`",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="⚔️ Report Duel (Officers Only)",
-        value="Report duel results after completion.\n"
-              "Command: `!report_duel @winner @loser`",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="📊 View Progress",
+        name="📊 View Progress - `!progress` or `!stats`",
         value="Check your stats, including events attended, duels won, and quiz status.\n"
-              "Shows progress bars for rank requirements.",
+              "Shows progress bars for rank requirements.\n"
+              "Usage: `!progress [@member]`",
         inline=False
     )
     
     embed.add_field(
-        name="📝 Quiz (Minor I Only)",
-        value="Start the rank-up quiz. Questions will be sent via DM, "
-              "and your answers will be reviewed by staff.",
+        name="❓ Help - `!help`",
+        value="Shows this help message with all available commands.",
         inline=False
     )
     
     embed.add_field(
-        name="🏠 Main Menu",
-        value="Use `!menu` or `?menu` to open this interactive menu anytime!",
+        name="💡 Quick Start",
+        value="New to the bot? Just type `!menu` to get started!\n"
+              "The interactive menu guides you through all features.",
         inline=False
     )
     
@@ -1276,374 +1524,16 @@ async def stats_command(ctx: commands.Context, member: Optional[discord.Member] 
     await progress_command(ctx, member)
 
 
-@bot.command(name="log_event")
-async def log_event_command(ctx: commands.Context):
-    """
-    !log_event
-    Now redirects to the enhanced menu system for a better experience.
-    Officers can use the interactive menu to log events.
-    """
-    if not isinstance(ctx.author, discord.Member) or not is_officer(ctx.author):
-        embed = create_styled_embed(
-            "🔒 Permission Denied",
-            "Only officers can log events.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.reply(embed=embed)
-        return
-    
-    # Redirect to menu for better UX
-    redirect_embed = create_styled_embed(
-        "📋 Enhanced Event Logging",
-        "Event logging is now available through our interactive menu system!\n\n"
-        "Use `!menu` or `?menu` to access the new interface with:\n"
-        "• Visual event type selection\n"
-        "• Easy co-host selection\n"
-        "• Multi-select attendee picker\n"
-        "• Instant confirmation\n\n"
-        "**Or continue with the text-based version below...**",
-        UIStyle.COLOR_INFO
-    )
-    await ctx.send(embed=redirect_embed)
-    
-    # Continue with legacy flow if they prefer
-    if not isinstance(ctx.author, discord.Member) or not is_officer(ctx.author):
-        return
-
-    event_types = [
-        "raid",
-        "defense",
-        "scrim",
-        "training",
-        "gamenight",
-        "recruitment",
-        "other",
-    ]
-
-    def msg_check(m: discord.Message):
-        return m.author == ctx.author and m.channel == ctx.channel
-
-    # Step 1: choose event type
-    type_list = "\n".join(
-        f"{i+1}. {name.capitalize()}" for i, name in enumerate(event_types)
-    )
-    await ctx.send(
-        "Select event type by number or name:\n" + type_list
-    )
-
-    try:
-        reply = await bot.wait_for("message", check=msg_check, timeout=60)
-    except asyncio.TimeoutError:
-        await ctx.send("Timed out waiting for event type.")
-        return
-
-    content = reply.content.strip().lower()
-
-    selected_type: Optional[str] = None
-    if content.isdigit():
-        idx = int(content) - 1
-        if 0 <= idx < len(event_types):
-            selected_type = event_types[idx]
-    else:
-        if content in event_types:
-            selected_type = content
-
-    if not selected_type:
-        await ctx.send("Invalid event type. Aborting.")
-        return
-
-    # Step 2: co-host
-    await ctx.send("Mention your co-host, or type `none` if there is no co-host.")
-
-    try:
-        reply = await bot.wait_for("message", check=msg_check, timeout=60)
-    except asyncio.TimeoutError:
-        await ctx.send("Timed out waiting for co-host.")
-        return
-
-    cohost_id: Optional[int] = None
-    if reply.content.strip().lower() != "none":
-        if reply.mentions:
-            cohost_id = reply.mentions[0].id
-        else:
-            await ctx.send("No valid mention detected. Assuming no co-host.")
-
-    # Step 3: attendees
-    await ctx.send(
-        "Now mention all attendees.\n"
-        "You can mention multiple people per message.\n"
-        "Type `done` when finished."
-    )
-
-    attendee_ids: List[int] = []
-
-    while True:
-        try:
-            msg = await bot.wait_for("message", check=msg_check, timeout=180)
-        except asyncio.TimeoutError:
-            await ctx.send("Timed out waiting for attendees. Aborting.")
-            return
-
-        if msg.content.strip().lower() == "done":
-            break
-
-        if msg.mentions:
-            for m in msg.mentions:
-                attendee_ids.append(m.id)
-        else:
-            await ctx.send("No mentions in that message – try again or type `done`.")
-
-    # Ensure host and cohost also count as attendees
-    attendee_ids.append(ctx.author.id)
-    if cohost_id:
-        attendee_ids.append(cohost_id)
-
-    event_id = await log_event(
-        selected_type,
-        ctx.author.id,
-        cohost_id,
-        attendee_ids,
-    )
-
-    await ctx.send(
-        f"Event logged (ID: `{event_id}`) "
-        f"type: **{selected_type.capitalize()}**, "
-        f"host: {ctx.author.mention}."
-    )
 
 
-@bot.command(name="challenge")
-async def challenge_command(ctx: commands.Context, opponent: Optional[discord.Member] = None):
-    """
-    !challenge @user
-    Asks the opponent to accept/decline with an enhanced UI.
-    If accepted, DM both users with a placeholder link.
-    """
-    if opponent is None:
-        embed = create_styled_embed(
-            "⚔️ Challenge Command",
-            "You need to mention someone to challenge!\n\n"
-            "**Usage:** `!challenge @user`\n"
-            "**Example:** `!challenge @PlayerName`",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
-
-    if opponent.bot:
-        embed = create_styled_embed(
-            "Invalid Target",
-            "You cannot challenge a bot!",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
-
-    if opponent.id == ctx.author.id:
-        embed = create_styled_embed(
-            "Invalid Target",
-            "You cannot challenge yourself!",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
-
-    def response_check(m: discord.Message):
-        return (
-            m.author.id == opponent.id
-            and m.channel == ctx.channel
-            and m.content.lower() in ("yes", "no", "y", "n", "accept", "decline")
-        )
-
-    challenge_embed = create_styled_embed(
-        "⚔️ Duel Challenge!",
-        f"{opponent.mention}, you have been challenged to a duel by {ctx.author.mention}!\n\n"
-        "**Respond with:**\n"
-        "• `yes` or `accept` to accept the challenge\n"
-        "• `no` or `decline` to decline\n\n"
-        f"⏱️ You have 60 seconds to respond...",
-        UIStyle.COLOR_WARNING
-    )
-    challenge_embed.set_thumbnail(url=ctx.author.display_avatar.url if ctx.author.display_avatar else None)
-    
-    await ctx.send(embed=challenge_embed)
-
-    try:
-        reply = await bot.wait_for("message", check=response_check, timeout=60)
-    except asyncio.TimeoutError:
-        timeout_embed = create_styled_embed(
-            "⏱️ Challenge Expired",
-            f"{opponent.mention} did not respond in time.\n\n"
-            f"The duel challenge has been cancelled.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=timeout_embed)
-        return
-
-    answer = reply.content.lower()
-    if answer in ("no", "n", "decline"):
-        declined_embed = create_styled_embed(
-            "❌ Challenge Declined",
-            f"{opponent.mention} has declined the duel challenge.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=declined_embed)
-        return
-
-    # Accepted
-    accepted_embed = create_styled_embed(
-        "✅ Challenge Accepted!",
-        f"{opponent.mention} has accepted the duel!\n\n"
-        "📨 Both players will receive a DM with the duel link.",
-        UIStyle.COLOR_SUCCESS
-    )
-    await ctx.send(embed=accepted_embed)
-
-    for user in (ctx.author, opponent):
-        try:
-            dm = await user.create_dm()
-            dm_embed = create_styled_embed(
-                "⚔️ Duel Information",
-                f"**Match:** {ctx.author.mention} vs {opponent.mention}\n\n"
-                f"**Duel Link:** {DUEL_PLACEHOLDER_LINK}\n\n"
-                "Good luck! May the best player win! 🎮",
-                UIStyle.COLOR_PRIMARY
-            )
-            dm_embed.add_field(
-                name="📋 After the Duel",
-                value="An officer will use `!report_duel` to log the results.",
-                inline=False
-            )
-            await dm.send(embed=dm_embed)
-        except Exception:
-            pass
 
 
-@bot.command(name="report_duel")
-async def report_duel_command(
-    ctx: commands.Context,
-    winner: Optional[discord.Member] = None,
-    loser: Optional[discord.Member] = None,
-):
-    """
-    !report_duel @winner @loser
-    Logs the duel winner to the database (+1 duel for winner).
-    Restricted to officers.
-    """
-    if not isinstance(ctx.author, discord.Member) or not is_officer(ctx.author):
-        embed = create_styled_embed(
-            "🔒 Permission Denied",
-            "Only officers can report duel results.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.reply(embed=embed)
-        return
-
-    if not winner or not loser:
-        embed = create_styled_embed(
-            "⚔️ Report Duel Result",
-            "You need to mention both the winner and loser!\n\n"
-            "**Usage:** `!report_duel @winner @loser`\n"
-            "**Example:** `!report_duel @John @Jane`",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
-
-    if winner.id == loser.id:
-        embed = create_styled_embed(
-            "Invalid Result",
-            "Winner and loser cannot be the same person!",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
-
-    await log_duel_result(winner.id, loser.id)
-    
-    result_embed = create_styled_embed(
-        "✅ Duel Result Recorded",
-        f"**Winner:** {winner.mention} 🏆\n"
-        f"**Loser:** {loser.mention}\n\n"
-        f"Recorded by: {ctx.author.mention}",
-        UIStyle.COLOR_SUCCESS
-    )
-    result_embed.set_thumbnail(url=winner.display_avatar.url if winner.display_avatar else None)
-    
-    await ctx.send(embed=result_embed)
-    
-    # Notify participants
-    for user, is_winner in [(winner, True), (loser, False)]:
-        try:
-            dm = await user.create_dm()
-            if is_winner:
-                dm_embed = create_styled_embed(
-                    "🏆 Duel Victory!",
-                    f"Congratulations! Your duel victory has been recorded.\n\n"
-                    f"**Opponent:** {loser.mention}\n"
-                    f"**Recorded by:** {ctx.author.mention}",
-                    UIStyle.COLOR_SUCCESS
-                )
-            else:
-                dm_embed = create_styled_embed(
-                    "⚔️ Duel Result",
-                    f"Your duel result has been recorded.\n\n"
-                    f"**Opponent:** {winner.mention}\n"
-                    f"**Recorded by:** {ctx.author.mention}",
-                    UIStyle.COLOR_INFO
-                )
-            await dm.send(embed=dm_embed)
-        except Exception:
-            pass
 
 
-@bot.command(name="quiz")
-async def quiz_command(ctx: commands.Context):
-    """
-    ?quiz (or !quiz)
-    Can only be run by the Minor I role (MINOR_I_ROLE_ID).
-    DMs the caller a 5-question quiz with enhanced UI.
-    Quiz is then posted to review channel where staff mark pass/fail via reactions.
-    """
-    if not isinstance(ctx.author, discord.Member):
-        embed = create_styled_embed(
-            "Server Only",
-            "This command must be used in a server.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
 
-    if not any(r.id == MINOR_I_ROLE_ID for r in ctx.author.roles):
-        embed = create_styled_embed(
-            "🔒 Permission Denied",
-            "Only Minor I members may start this quiz.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
 
-    user = ctx.author
-    try:
-        dm = await user.create_dm()
-    except Exception:
-        embed = create_styled_embed(
-            "DM Error",
-            "Unable to send you a DM. Please enable DMs from this server in your privacy settings.",
-            UIStyle.COLOR_ERROR
-        )
-        await ctx.send(embed=embed)
-        return
 
-    notification_embed = create_styled_embed(
-        "📨 Quiz Started!",
-        f"{user.mention}, check your DMs!\n\n"
-        "The quiz has been sent to you privately.",
-        UIStyle.COLOR_SUCCESS
-    )
-    await ctx.send(embed=notification_embed)
-    
-    await start_quiz_flow(user, ctx.guild)
+
 
 
 @bot.command(name="progress")
