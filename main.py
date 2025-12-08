@@ -25,9 +25,6 @@ OFFICER_ROLE_IDS = [
     # ...
 ]
 
-# Role ID for "Minor I" (allowed to start the quiz)
-MINOR_I_ROLE_ID = 1129557455244902451  # REPLACE with real role ID
-
 # Roles that are allowed to mark quizzes as pass/fail
 QUIZ_REVIEWER_ROLE_IDS = [
     1129557455244902459,  # e.g. High Command, Inquisitors etc.
@@ -37,16 +34,141 @@ QUIZ_REVIEWER_ROLE_IDS = [
 # Channel where completed quiz attempts are sent for review
 QUIZ_REVIEW_CHANNEL_ID = 1129557456947781649  # REPLACE with real channel ID
 
-# Placeholder link for duel DM
-DUEL_PLACEHOLDER_LINK = "https://example.com/your-duel-link"  # EDIT this later
+# =========================
+# RANK SYSTEM CONFIGURATION
+# =========================
 
-# Default requirements used for !progress bars (edit to match next-rank target)
-DEFAULT_REQUIREMENTS = {
-    "events": 7,       # e.g. 7 events
-    "warfare": 3,      # e.g. 3 warfare events
-    "training": 2,     # e.g. 2 trainings
-    "duels": 2,        # e.g. 2 duels
+# Define all rank role IDs (REPLACE with actual role IDs)
+RANK_ROLE_IDS = {
+    "minor_iii": 1000000000000000001,   # Minor III
+    "minor_ii": 1000000000000000002,    # Minor II
+    "minor_i": 1000000000000000003,     # Minor I
+    "major_iii": 1000000000000000004,   # Major III
+    "major_ii": 1000000000000000005,    # Major II
+    "major_i": 1000000000000000006,     # Major I
+    "ultra_iii": 1000000000000000007,   # Ultra III (Officer apps open)
+    "ultra_ii": 1000000000000000008,    # Ultra II
+    "ultra_i": 1000000000000000009,     # Ultra I
+    "champion": 1000000000000000010,    # Champion
 }
+
+# Define rank progression and requirements
+RANK_REQUIREMENTS = {
+    RANK_ROLE_IDS["minor_iii"]: {
+        "current_rank": "Minor III",
+        "next_rank": "Minor II",
+        "requirements": {
+            "events": 5,
+            "warfare": 0,
+            "training": 0,
+            "duels": 0,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["minor_ii"]: {
+        "current_rank": "Minor II",
+        "next_rank": "Minor I",
+        "requirements": {
+            "events": 7,
+            "warfare": 0,
+            "training": 0,
+            "duels": 0,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["minor_i"]: {
+        "current_rank": "Minor I",
+        "next_rank": "Major III",
+        "requirements": {
+            "events": 8,
+            "warfare": 0,
+            "training": 0,
+            "duels": 0,
+            "quiz": True
+        }
+    },
+    RANK_ROLE_IDS["major_iii"]: {
+        "current_rank": "Major III",
+        "next_rank": "Major II",
+        "requirements": {
+            "events": 0,
+            "warfare": 3,
+            "training": 3,
+            "duels": 0,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["major_ii"]: {
+        "current_rank": "Major II",
+        "next_rank": "Major I",
+        "requirements": {
+            "events": 0,
+            "warfare": 5,
+            "training": 3,
+            "duels": 0,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["major_i"]: {
+        "current_rank": "Major I",
+        "next_rank": "Ultra III",
+        "requirements": {
+            "events": 0,
+            "warfare": 3,
+            "training": 2,
+            "duels": 1,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["ultra_iii"]: {
+        "current_rank": "Ultra III",
+        "next_rank": "Ultra II",
+        "requirements": {
+            "events": 0,
+            "warfare": 4,
+            "training": 2,
+            "duels": 1,
+            "quiz": False
+        },
+        "note": "Officer Applications Open"
+    },
+    RANK_ROLE_IDS["ultra_ii"]: {
+        "current_rank": "Ultra II",
+        "next_rank": "Ultra I",
+        "requirements": {
+            "events": 0,
+            "warfare": 3,
+            "training": 2,
+            "duels": 3,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["ultra_i"]: {
+        "current_rank": "Ultra I",
+        "next_rank": "Champion",
+        "requirements": {
+            "events": 0,
+            "warfare": 2,
+            "training": 2,
+            "duels": 5,
+            "quiz": False
+        }
+    },
+    RANK_ROLE_IDS["champion"]: {
+        "current_rank": "Champion",
+        "next_rank": None,
+        "requirements": {},
+        "note": "Maximum Rank Achieved!"
+    }
+}
+
+# Helper to get user's current rank
+def get_user_rank(member: discord.Member) -> Optional[Tuple[int, Dict]]:
+    """Returns (role_id, rank_info) for the user's highest rank role, or None"""
+    for role in member.roles:
+        if role.id in RANK_REQUIREMENTS:
+            return (role.id, RANK_REQUIREMENTS[role.id])
+    return None
 
 # Events that count as warfare (for hosted/attended warfare stats)
 WARFARE_EVENT_TYPES = {"raid", "defense", "scrim"}
@@ -501,7 +623,8 @@ class QuizButton(ui.Button):
             )
             return
         
-        if not any(r.id == MINOR_I_ROLE_ID for r in interaction.user.roles):
+        # Check if user has Minor I role
+        if not any(r.id == RANK_ROLE_IDS["minor_i"] for r in interaction.user.roles):
             await interaction.response.send_message(
                 embed=create_styled_embed(
                     "Permission Denied",
@@ -727,6 +850,113 @@ class AttendeeSelect(ui.UserSelect):
         )
 
 
+class DuelLinkModal(ui.Modal, title="Enter Duel Link"):
+    """Modal for entering custom Roblox private server link"""
+    
+    duel_link = ui.TextInput(
+        label="Roblox Private Server Link",
+        placeholder="https://www.roblox.com/games/...",
+        required=True,
+        style=discord.TextStyle.short,
+        max_length=500
+    )
+    
+    def __init__(self, opponent: discord.Member, challenger: discord.User, channel: discord.TextChannel):
+        super().__init__()
+        self.opponent = opponent
+        self.challenger = challenger
+        self.channel = channel
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        
+        duel_link = self.duel_link.value.strip()
+        
+        # Validate it's a URL
+        if not (duel_link.startswith("http://") or duel_link.startswith("https://")):
+            await interaction.followup.send(
+                embed=create_styled_embed(
+                    "Invalid Link",
+                    "Please provide a valid URL starting with http:// or https://",
+                    UIStyle.COLOR_ERROR
+                ),
+                ephemeral=True
+            )
+            return
+        
+        # Send challenge to the channel
+        def response_check(m: discord.Message):
+            return (
+                m.author.id == self.opponent.id
+                and m.channel == self.channel
+                and m.content.lower() in ("yes", "no", "y", "n", "accept", "decline")
+            )
+
+        challenge_embed = create_styled_embed(
+            "⚔️ Duel Challenge!",
+            f"{self.opponent.mention}, you have been challenged to a duel by {self.challenger.mention}!\n\n"
+            "**Respond with:**\n"
+            "• `yes` or `accept` to accept the challenge\n"
+            "• `no` or `decline` to decline\n\n"
+            f"⏱️ You have 60 seconds to respond...",
+            UIStyle.COLOR_WARNING
+        )
+        challenge_embed.set_thumbnail(url=self.challenger.display_avatar.url if self.challenger.display_avatar else None)
+        
+        await self.channel.send(embed=challenge_embed)
+
+        try:
+            reply = await bot.wait_for("message", check=response_check, timeout=60)
+        except asyncio.TimeoutError:
+            timeout_embed = create_styled_embed(
+                "⏱️ Challenge Expired",
+                f"{self.opponent.mention} did not respond in time.\n\n"
+                f"The duel challenge has been cancelled.",
+                UIStyle.COLOR_ERROR
+            )
+            await self.channel.send(embed=timeout_embed)
+            return
+
+        answer = reply.content.lower()
+        if answer in ("no", "n", "decline"):
+            declined_embed = create_styled_embed(
+                "❌ Challenge Declined",
+                f"{self.opponent.mention} has declined the duel challenge.",
+                UIStyle.COLOR_ERROR
+            )
+            await self.channel.send(embed=declined_embed)
+            return
+
+        # Accepted
+        accepted_embed = create_styled_embed(
+            "✅ Challenge Accepted!",
+            f"{self.opponent.mention} has accepted the duel!\n\n"
+            "📨 Both players will receive a DM with the duel link.",
+            UIStyle.COLOR_SUCCESS
+        )
+        await self.channel.send(embed=accepted_embed)
+
+        # Send DM with custom duel link
+        for user in (self.challenger, self.opponent):
+            try:
+                dm = await user.create_dm()
+                dm_embed = create_styled_embed(
+                    "⚔️ Duel Information",
+                    f"**Match:** {self.challenger.mention} vs {self.opponent.mention}\n\n"
+                    f"**Duel Link:** {duel_link}\n\n"
+                    "Good luck! May the best player win! 🎮",
+                    UIStyle.COLOR_PRIMARY
+                )
+                dm_embed.add_field(
+                    name="📋 After the Duel",
+                    value="An officer will use the menu to report the results.",
+                    inline=False
+                )
+                await dm.send(embed=dm_embed)
+            except Exception:
+                pass
+
+
 class ChallengeSelectView(ui.View):
     """Select opponent for challenge"""
     
@@ -773,80 +1003,9 @@ class OpponentSelect(ui.UserSelect):
             )
             return
         
-        await interaction.response.defer()
-        
-        # Send challenge to the channel
-        channel = interaction.channel
-        
-        def response_check(m: discord.Message):
-            return (
-                m.author.id == opponent.id
-                and m.channel == channel
-                and m.content.lower() in ("yes", "no", "y", "n", "accept", "decline")
-            )
-
-        challenge_embed = create_styled_embed(
-            "⚔️ Duel Challenge!",
-            f"{opponent.mention}, you have been challenged to a duel by {challenger.mention}!\n\n"
-            "**Respond with:**\n"
-            "• `yes` or `accept` to accept the challenge\n"
-            "• `no` or `decline` to decline\n\n"
-            f"⏱️ You have 60 seconds to respond...",
-            UIStyle.COLOR_WARNING
-        )
-        challenge_embed.set_thumbnail(url=challenger.display_avatar.url if challenger.display_avatar else None)
-        
-        await channel.send(embed=challenge_embed)
-
-        try:
-            reply = await bot.wait_for("message", check=response_check, timeout=60)
-        except asyncio.TimeoutError:
-            timeout_embed = create_styled_embed(
-                "⏱️ Challenge Expired",
-                f"{opponent.mention} did not respond in time.\n\n"
-                f"The duel challenge has been cancelled.",
-                UIStyle.COLOR_ERROR
-            )
-            await channel.send(embed=timeout_embed)
-            return
-
-        answer = reply.content.lower()
-        if answer in ("no", "n", "decline"):
-            declined_embed = create_styled_embed(
-                "❌ Challenge Declined",
-                f"{opponent.mention} has declined the duel challenge.",
-                UIStyle.COLOR_ERROR
-            )
-            await channel.send(embed=declined_embed)
-            return
-
-        # Accepted
-        accepted_embed = create_styled_embed(
-            "✅ Challenge Accepted!",
-            f"{opponent.mention} has accepted the duel!\n\n"
-            "📨 Both players will receive a DM with the duel link.",
-            UIStyle.COLOR_SUCCESS
-        )
-        await channel.send(embed=accepted_embed)
-
-        for user in (challenger, opponent):
-            try:
-                dm = await user.create_dm()
-                dm_embed = create_styled_embed(
-                    "⚔️ Duel Information",
-                    f"**Match:** {challenger.mention} vs {opponent.mention}\n\n"
-                    f"**Duel Link:** {DUEL_PLACEHOLDER_LINK}\n\n"
-                    "Good luck! May the best player win! 🎮",
-                    UIStyle.COLOR_PRIMARY
-                )
-                dm_embed.add_field(
-                    name="📋 After the Duel",
-                    value="An officer will use the menu to report the results.",
-                    inline=False
-                )
-                await dm.send(embed=dm_embed)
-            except Exception:
-                pass
+        # Open modal for duel link input
+        modal = DuelLinkModal(opponent, challenger, interaction.channel)
+        await interaction.response.send_modal(modal)
 
 
 class DuelReportView(ui.View):
@@ -1081,93 +1240,147 @@ def create_help_embed() -> discord.Embed:
 
 
 def create_progress_embed(member: discord.Member, stats: Dict[str, int]) -> discord.Embed:
-    """Create enhanced progress embed"""
+    """Create enhanced progress embed with rank-specific requirements"""
     total_att = stats["total_attended"]
     warfare_att = stats["warfare_attended"]
     training_att = stats["training_attended"]
     duels_won = stats["duels_won"]
     quiz_passed = bool(stats["quiz_passed"])
 
-    req_events = DEFAULT_REQUIREMENTS.get("events", 0)
-    req_warfare = DEFAULT_REQUIREMENTS.get("warfare", 0)
-    req_training = DEFAULT_REQUIREMENTS.get("training", 0)
-    req_duels = DEFAULT_REQUIREMENTS.get("duels", 0)
+    # Get user's current rank and requirements
+    rank_info = get_user_rank(member)
+    
+    if rank_info:
+        role_id, rank_data = rank_info
+        current_rank = rank_data["current_rank"]
+        next_rank = rank_data["next_rank"]
+        requirements = rank_data["requirements"]
+        note = rank_data.get("note", "")
+    else:
+        # Default fallback if no rank role found
+        current_rank = "Unranked"
+        next_rank = "Minor III"
+        requirements = {"events": 0, "warfare": 0, "training": 0, "duels": 0, "quiz": False}
+        note = "Join us to start your journey!"
+
+    req_events = requirements.get("events", 0)
+    req_warfare = requirements.get("warfare", 0)
+    req_training = requirements.get("training", 0)
+    req_duels = requirements.get("duels", 0)
+    req_quiz = requirements.get("quiz", False)
+
+    # Build description
+    if next_rank:
+        description = f"**Current Rank:** {current_rank}\n**Next Rank:** {next_rank}\n"
+        if note:
+            description += f"*{note}*\n"
+        description += "\nYour progress towards the next rank:"
+    else:
+        description = f"**Current Rank:** {current_rank}\n{note}"
 
     embed = discord.Embed(
         title=f"📊 Progress Report: {member.display_name}",
-        description="Your current stats and progress towards next rank:",
+        description=description,
         color=UIStyle.COLOR_PRIMARY,
         timestamp=discord.utils.utcnow()
     )
     
     embed.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
 
-    # Calculate completion percentage
-    total_progress = 0
-    total_items = 4
-    
-    if total_att >= req_events:
-        total_progress += 1
-    if warfare_att >= req_warfare:
-        total_progress += 1
-    if training_att >= req_training:
-        total_progress += 1
-    if duels_won >= req_duels:
-        total_progress += 1
-    
-    completion = int((total_progress / total_items) * 100)
-    
+    # Calculate completion percentage (only if there's a next rank)
+    if next_rank:
+        total_items = 0
+        total_progress = 0
+        
+        if req_events > 0:
+            total_items += 1
+            if total_att >= req_events:
+                total_progress += 1
+        
+        if req_warfare > 0:
+            total_items += 1
+            if warfare_att >= req_warfare:
+                total_progress += 1
+        
+        if req_training > 0:
+            total_items += 1
+            if training_att >= req_training:
+                total_progress += 1
+        
+        if req_duels > 0:
+            total_items += 1
+            if duels_won >= req_duels:
+                total_progress += 1
+        
+        if req_quiz:
+            total_items += 1
+            if quiz_passed:
+                total_progress += 1
+        
+        if total_items > 0:
+            completion = int((total_progress / total_items) * 100)
+            
+            embed.add_field(
+                name="🎯 Overall Completion",
+                value=f"**{completion}%** ({total_progress}/{total_items} requirements met)\n"
+                      f"{make_progress_bar(total_progress, total_items, 15)}",
+                inline=False
+            )
+
+        # Events Attended (only show if required)
+        if req_events > 0:
+            status = "✅" if total_att >= req_events else "⏳"
+            embed.add_field(
+                name=f"{status} Events Attended",
+                value=f"**{total_att}/{req_events}** events\n{make_progress_bar(total_att, req_events, 12)}",
+                inline=True
+            )
+
+        # Warfare Events (only show if required)
+        if req_warfare > 0:
+            status = "✅" if warfare_att >= req_warfare else "⏳"
+            embed.add_field(
+                name=f"{status} Warfare Events",
+                value=f"**{warfare_att}/{req_warfare}** raids/defenses/scrims\n{make_progress_bar(warfare_att, req_warfare, 12)}",
+                inline=True
+            )
+
+        # Training Events (only show if required)
+        if req_training > 0:
+            status = "✅" if training_att >= req_training else "⏳"
+            embed.add_field(
+                name=f"{status} Training Events",
+                value=f"**{training_att}/{req_training}** trainings\n{make_progress_bar(training_att, req_training, 12)}",
+                inline=True
+            )
+
+        # Duels Won (only show if required)
+        if req_duels > 0:
+            status = "✅" if duels_won >= req_duels else "⏳"
+            embed.add_field(
+                name=f"{status} Duels Won",
+                value=f"**{duels_won}/{req_duels}** duels\n{make_progress_bar(duels_won, req_duels, 12)}",
+                inline=True
+            )
+
+        # Quiz Status (only show if required)
+        if req_quiz:
+            status = "✅" if quiz_passed else "⏳"
+            embed.add_field(
+                name=f"{status} Quiz Status",
+                value="✅ **Passed**" if quiz_passed else "❌ **Not Completed**",
+                inline=True
+            )
+
+    # Always show overall stats
     embed.add_field(
-        name="🎯 Overall Completion",
-        value=f"**{completion}%** ({total_progress}/{total_items} requirements met)\n"
-              f"{make_progress_bar(total_progress, total_items, 15)}",
+        name="📈 Overall Statistics",
+        value=f"**Total Events:** {total_att}\n"
+              f"**Warfare Events:** {warfare_att}\n"
+              f"**Training Events:** {training_att}\n"
+              f"**Duels Won:** {duels_won}\n"
+              f"**Events Hosted:** {stats['total_hosted']}",
         inline=False
-    )
-
-    # Events Attended
-    status = "✅" if total_att >= req_events else "⏳"
-    embed.add_field(
-        name=f"{status} Events Attended",
-        value=f"**{total_att}/{req_events}** events\n{make_progress_bar(total_att, req_events, 12)}",
-        inline=True
-    )
-
-    # Warfare Events
-    status = "✅" if warfare_att >= req_warfare else "⏳"
-    embed.add_field(
-        name=f"{status} Warfare Events",
-        value=f"**{warfare_att}/{req_warfare}** raids/defenses/scrims\n{make_progress_bar(warfare_att, req_warfare, 12)}",
-        inline=True
-    )
-
-    # Training Events
-    status = "✅" if training_att >= req_training else "⏳"
-    embed.add_field(
-        name=f"{status} Training Events",
-        value=f"**{training_att}/{req_training}** trainings\n{make_progress_bar(training_att, req_training, 12)}",
-        inline=True
-    )
-
-    # Duels Won
-    status = "✅" if duels_won >= req_duels else "⏳"
-    embed.add_field(
-        name=f"{status} Duels Won",
-        value=f"**{duels_won}/{req_duels}** duels\n{make_progress_bar(duels_won, req_duels, 12)}",
-        inline=True
-    )
-
-    # Hosted stats
-    embed.add_field(
-        name="🎯 Events Hosted",
-        value=f"Total: **{stats['total_hosted']}**\nWarfare: **{stats['warfare_hosted']}**",
-        inline=True
-    )
-
-    # Quiz Status
-    embed.add_field(
-        name="📝 Quiz Status",
-        value="✅ **Passed**" if quiz_passed else "❌ **Not Completed**",
-        inline=True
     )
 
     embed.set_footer(text="Covenant Technologies • Keep up the great work!")
