@@ -1565,8 +1565,34 @@ def create_progress_embed(member: discord.Member, stats: Dict[str, int]) -> disc
     return embed
 
 
+class QuizConfirmView(discord.ui.View):
+    """View for confirming quiz answers"""
+    def __init__(self, user_id: int):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.confirmed = None
+    
+    @discord.ui.button(label="✅ Confirm Answer", style=discord.ButtonStyle.success)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your quiz!", ephemeral=True)
+            return
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+    
+    @discord.ui.button(label="↩️ Re-answer", style=discord.ButtonStyle.secondary)
+    async def reanswer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This is not your quiz!", ephemeral=True)
+            return
+        self.confirmed = False
+        self.stop()
+        await interaction.response.defer()
+
+
 async def start_quiz_flow(user: discord.Member, guild: discord.Guild):
-    """Enhanced quiz flow with better UI"""
+    """Enhanced quiz flow with button-based confirmation"""
     try:
         dm = await user.create_dm()
     except Exception:
@@ -1578,7 +1604,7 @@ async def start_quiz_flow(user: discord.Member, guild: discord.Guild):
         "Welcome to the rank-up quiz!\n\n"
         "**Instructions:**\n"
         "• You will be asked 5 questions\n"
-        "• Type your answer and confirm it\n"
+        "• Type your answer and confirm it with buttons\n"
         "• You can re-answer before confirming\n"
         "• Your answers will be reviewed by staff\n\n"
         "**Ready? Let's begin!**",
@@ -1617,29 +1643,17 @@ async def start_quiz_flow(user: discord.Member, guild: discord.Guild):
             confirm_embed = create_styled_embed(
                 "Confirm Your Answer",
                 f"**Your answer:**\n```{answer_text}```\n\n"
-                "React with ✅ to confirm or ❌ to re-answer this question.",
+                "Click **✅ Confirm Answer** to proceed or **↩️ Re-answer** to try again.",
                 UIStyle.COLOR_WARNING
             )
-            confirm_msg = await dm.send(embed=confirm_embed)
-
-            def reaction_check(reaction: discord.Reaction, reactor: discord.User):
-                return (
-                    reactor.id == user.id
-                    and reaction.message.id == confirm_msg.id
-                    and str(reaction.emoji) in ("✅", "❌")
-                )
-
-            try:
-                await confirm_msg.add_reaction("✅")
-                await confirm_msg.add_reaction("❌")
-            except Exception:
-                pass
-
-            try:
-                reaction, reactor = await bot.wait_for(
-                    "reaction_add", check=reaction_check, timeout=120
-                )
-            except asyncio.TimeoutError:
+            
+            view = QuizConfirmView(user.id)
+            confirm_msg = await dm.send(embed=confirm_embed, view=view)
+            
+            await view.wait()
+            
+            if view.confirmed is None:
+                # Timeout
                 timeout_embed = create_styled_embed(
                     "⏱️ Quiz Timed Out",
                     "The quiz has timed out. Please run `!menu` and try again.",
@@ -1647,8 +1661,13 @@ async def start_quiz_flow(user: discord.Member, guild: discord.Guild):
                 )
                 await dm.send(embed=timeout_embed)
                 return
+            
+            # Disable buttons after interaction
+            for item in view.children:
+                item.disabled = True
+            await confirm_msg.edit(view=view)
 
-            if str(reaction.emoji) == "✅":
+            if view.confirmed:
                 answers.append(answer_text)
                 if index < len(QUIZ_QUESTIONS):
                     progress_embed = create_styled_embed(
