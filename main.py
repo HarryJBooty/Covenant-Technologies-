@@ -436,8 +436,8 @@ class ReportDuelButton(ui.Button):
         await interaction.response.send_message(
             embed=create_styled_embed(
                 "⚔️ Report Duel Result",
-                "Use the command: `/report_duel @winner @loser`\n\n"
-                "Example: `/report_duel @John @Jane`",
+                "Use the command: `!report_duel @winner @loser`\n\n"
+                "Example: `!report_duel @John @Jane`",
                 UIStyle.COLOR_INFO
             ),
             ephemeral=True
@@ -457,8 +457,8 @@ class ChallengeButton(ui.Button):
         await interaction.response.send_message(
             embed=create_styled_embed(
                 "⚔️ Challenge a Player",
-                "Use the command: `/challenge @opponent`\n\n"
-                "Example: `/challenge @PlayerName`\n\n"
+                "Use the command: `!challenge @opponent`\n\n"
+                "Example: `!challenge @PlayerName`\n\n"
                 "They will receive a notification to accept or decline!",
                 UIStyle.COLOR_INFO
             ),
@@ -796,14 +796,14 @@ def create_help_embed() -> discord.Embed:
     embed.add_field(
         name="⚔️ Challenge Player",
         value="Challenge another player to a duel.\n"
-              "Command: `/challenge @opponent`",
+              "Command: `!challenge @opponent`",
         inline=False
     )
     
     embed.add_field(
         name="⚔️ Report Duel (Officers Only)",
         value="Report duel results after completion.\n"
-              "Command: `/report_duel @winner @loser`",
+              "Command: `!report_duel @winner @loser`",
         inline=False
     )
     
@@ -823,7 +823,7 @@ def create_help_embed() -> discord.Embed:
     
     embed.add_field(
         name="🏠 Main Menu",
-        value="Use `/menu` or `!menu` to open this interactive menu anytime!",
+        value="Use `!menu` or `?menu` to open this interactive menu anytime!",
         inline=False
     )
     
@@ -968,7 +968,7 @@ async def start_quiz_flow(user: discord.Member, guild: discord.Guild):
             except asyncio.TimeoutError:
                 timeout_embed = create_styled_embed(
                     "⏱️ Quiz Timed Out",
-                    "The quiz has timed out. Please run `/menu` and try again when ready.",
+                    "The quiz has timed out. Please run `!menu` and try again when ready.",
                     UIStyle.COLOR_ERROR
                 )
                 await dm.send(embed=timeout_embed)
@@ -1004,7 +1004,7 @@ async def start_quiz_flow(user: discord.Member, guild: discord.Guild):
             except asyncio.TimeoutError:
                 timeout_embed = create_styled_embed(
                     "⏱️ Quiz Timed Out",
-                    "The quiz has timed out. Please run `/menu` and try again.",
+                    "The quiz has timed out. Please run `!menu` and try again.",
                     UIStyle.COLOR_ERROR
                 )
                 await dm.send(embed=timeout_embed)
@@ -1227,7 +1227,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     f"Your quiz has been reviewed and did not pass this time.\n\n"
                     f"**Reviewed by:** {member.mention}\n\n"
                     "Don't worry! You can retake the quiz when you're ready. "
-                    "Use `/menu` and select 'Start Quiz' to try again.",
+                    "Use `!menu` and select 'Start Quiz' to try again.",
                     UIStyle.COLOR_WARNING
                 )
             await dm.send(embed=dm_embed)
@@ -1296,7 +1296,7 @@ async def log_event_command(ctx: commands.Context):
     redirect_embed = create_styled_embed(
         "📋 Enhanced Event Logging",
         "Event logging is now available through our interactive menu system!\n\n"
-        "Use `/menu` or `!menu` to access the new interface with:\n"
+        "Use `!menu` or `?menu` to access the new interface with:\n"
         "• Visual event type selection\n"
         "• Easy co-host selection\n"
         "• Multi-select attendee picker\n"
@@ -1511,7 +1511,7 @@ async def challenge_command(ctx: commands.Context, opponent: Optional[discord.Me
             )
             dm_embed.add_field(
                 name="📋 After the Duel",
-                value="An officer will use `/report_duel` to log the results.",
+                value="An officer will use `!report_duel` to log the results.",
                 inline=False
             )
             await dm.send(embed=dm_embed)
