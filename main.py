@@ -19,21 +19,21 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Allowed roles for logging events (officer roles)
 OFFICER_ROLE_IDS = [
-    111111111111111111,  # REPLACE with real officer role IDs
+    1283223363980103702,  # REPLACE with real officer role IDs
     # ...
 ]
 
 # Role ID for "Minor I" (allowed to start the quiz)
-MINOR_I_ROLE_ID = 222222222222222222  # REPLACE with real role ID
+MINOR_I_ROLE_ID = 1129557455244902451  # REPLACE with real role ID
 
 # Roles that are allowed to mark quizzes as pass/fail
 QUIZ_REVIEWER_ROLE_IDS = [
-    333333333333333333,  # e.g. High Command, Inquisitors etc.
+    1129557455244902459,  # e.g. High Command, Inquisitors etc.
     # ...
 ]
 
 # Channel where completed quiz attempts are sent for review
-QUIZ_REVIEW_CHANNEL_ID = 444444444444444444  # REPLACE with real channel ID
+QUIZ_REVIEW_CHANNEL_ID = 1129557456947781649  # REPLACE with real channel ID
 
 # Placeholder link for duel DM
 DUEL_PLACEHOLDER_LINK = "https://example.com/your-duel-link"  # EDIT this later
