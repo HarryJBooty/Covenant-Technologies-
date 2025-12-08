@@ -271,11 +271,11 @@ TRAINING_EVENT_TYPES = {"training"}
 
 # Quiz questions (placeholders – edit texts as you like)
 QUIZ_QUESTIONS = [
-    "Question 1 placeholder – edit me.",
-    "Question 2 placeholder – edit me.",
-    "Question 3 placeholder – edit me.",
-    "Question 4 placeholder – edit me.",
-    "Question 5 placeholder – edit me.",
+    "How should you behave during raids, trainings and other Covenant events?",
+    "Explain the Covenant's uniform policy and how it applies to you.",
+    "What is the Covenant's stance on cheating and recording policy?",
+    "Explain the Covenant's policy on toxicity and how it applies to you.",
+    "Do you understand the rules of the Covenant and promise to follow them?",
 ]
 
 # =========================
