@@ -34,21 +34,27 @@ QUIZ_REVIEWER_ROLE_IDS = [
 # Channel where completed quiz attempts are sent for review
 QUIZ_REVIEW_CHANNEL_ID = 1129557456947781649  # REPLACE with real channel ID
 
+# Channel where promotion notifications are sent (can be same as quiz review)
+PROMOTION_CHANNEL_ID = 1129557456947781649  # REPLACE with real channel ID
+
+# High Command role ID to ping for promotions
+HIGH_COMMAND_ROLE_ID = 1440166465906016306  # REPLACE with HiCom role ID
+
 # =========================
 # RANK SYSTEM CONFIGURATION
 # =========================
 
 # Define all rank role IDs (REPLACE with actual role IDs)
 RANK_ROLE_IDS = {
-    "minor_iii": 1000000000000000001,   # Minor III
-    "minor_ii": 1000000000000000002,    # Minor II
-    "minor_i": 1000000000000000003,     # Minor I
-    "major_iii": 1000000000000000004,   # Major III
-    "major_ii": 1000000000000000005,    # Major II
-    "major_i": 1000000000000000006,     # Major I
-    "ultra_iii": 1000000000000000007,   # Ultra III (Officer apps open)
-    "ultra_ii": 1000000000000000008,    # Ultra II
-    "ultra_i": 1000000000000000009,     # Ultra I
+    "minor_iii": 1129557455211339825,   # Minor III
+    "minor_ii": 1129557455211339826,    # Minor II
+    "minor_i": 1129557455244902451,     # Minor I
+    "major_iii": 1129557455244902452,   # Major III
+    "major_ii": 1129557455244902455,    # Major II
+    "major_i": 1129557455244902456,     # Major I
+    "ultra_iii": 1149841811884486676,   # Ultra III (Officer apps open)
+    "ultra_ii": 1155175565171634297,    # Ultra II
+    "ultra_i": 1155175631286444143,     # Ultra I
     "champion": 1000000000000000010,    # Champion
 }
 
@@ -169,6 +175,93 @@ def get_user_rank(member: discord.Member) -> Optional[Tuple[int, Dict]]:
         if role.id in RANK_REQUIREMENTS:
             return (role.id, RANK_REQUIREMENTS[role.id])
     return None
+
+
+async def check_promotion_eligible(member: discord.Member, stats: Dict[str, int], guild: discord.Guild):
+    """Check if user meets requirements for next rank and send notification to HiCom"""
+    rank_info = get_user_rank(member)
+    if not rank_info:
+        return
+    
+    role_id, rank_data = rank_info
+    next_rank = rank_data.get("next_rank")
+    
+    # No promotion if at max rank
+    if not next_rank:
+        return
+    
+    requirements = rank_data["requirements"]
+    current_rank = rank_data["current_rank"]
+    
+    # Check if all requirements are met
+    total_att = stats["total_attended"]
+    warfare_att = stats["warfare_attended"]
+    training_att = stats["training_attended"]
+    duels_won = stats["duels_won"]
+    quiz_passed = bool(stats["quiz_passed"])
+    
+    req_events = requirements.get("events", 0)
+    req_warfare = requirements.get("warfare", 0)
+    req_training = requirements.get("training", 0)
+    req_duels = requirements.get("duels", 0)
+    req_quiz = requirements.get("quiz", False)
+    
+    # Check each requirement
+    if req_events > 0 and total_att < req_events:
+        return
+    if req_warfare > 0 and warfare_att < req_warfare:
+        return
+    if req_training > 0 and training_att < req_training:
+        return
+    if req_duels > 0 and duels_won < req_duels:
+        return
+    if req_quiz and not quiz_passed:
+        return
+    
+    # All requirements met! Send promotion notification
+    promotion_channel = guild.get_channel(PROMOTION_CHANNEL_ID)
+    if promotion_channel:
+        hicom_role = guild.get_role(HIGH_COMMAND_ROLE_ID)
+        ping_text = hicom_role.mention if hicom_role else "@High Command"
+        
+        promotion_embed = create_styled_embed(
+            "🎉 Promotion Ready!",
+            f"{ping_text}\n\n"
+            f"**Member:** {member.mention} ({member.display_name})\n"
+            f"**Current Rank:** {current_rank}\n"
+            f"**Ready for:** {next_rank}\n\n"
+            f"**Requirements Met:**",
+            UIStyle.COLOR_SUCCESS
+        )
+        
+        # Show what they completed
+        requirements_text = []
+        if req_events > 0:
+            requirements_text.append(f"✅ Events: {total_att}/{req_events}")
+        if req_warfare > 0:
+            requirements_text.append(f"✅ Warfare: {warfare_att}/{req_warfare}")
+        if req_training > 0:
+            requirements_text.append(f"✅ Training: {training_att}/{req_training}")
+        if req_duels > 0:
+            requirements_text.append(f"✅ Duels: {duels_won}/{req_duels}")
+        if req_quiz:
+            requirements_text.append(f"✅ Quiz: Passed")
+        
+        promotion_embed.add_field(
+            name="Completed Requirements",
+            value="\n".join(requirements_text),
+            inline=False
+        )
+        
+        promotion_embed.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
+        
+        try:
+            await promotion_channel.send(
+                content=ping_text,
+                embed=promotion_embed
+            )
+        except Exception as e:
+            logger.error(f"Failed to send promotion notification: {e}")
 
 # Events that count as warfare (for hosted/attended warfare stats)
 WARFARE_EVENT_TYPES = {"raid", "defense", "scrim"}
@@ -599,6 +692,11 @@ class ProgressButton(ui.Button):
         
         stats = await get_user_stats(interaction.user.id)
         embed = create_progress_embed(interaction.user, stats)
+        
+        # Check if user is eligible for promotion
+        if isinstance(interaction.user, discord.Member):
+            await check_promotion_eligible(interaction.user, stats, interaction.guild)
+        
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -850,40 +948,28 @@ class AttendeeSelect(ui.UserSelect):
         )
 
 
-class DuelLinkModal(ui.Modal, title="Enter Duel Link"):
-    """Modal for entering custom Roblox private server link"""
+class SupervisorSelectView(ui.View):
+    """Select supervising officer for duel"""
     
-    duel_link = ui.TextInput(
-        label="Roblox Private Server Link",
-        placeholder="https://www.roblox.com/games/...",
-        required=True,
-        style=discord.TextStyle.short,
-        max_length=500
-    )
-    
-    def __init__(self, opponent: discord.Member, challenger: discord.User, channel: discord.TextChannel):
-        super().__init__()
+    def __init__(self, opponent: discord.Member, challenger: discord.User, channel: discord.TextChannel, duel_link: str):
+        super().__init__(timeout=180)
         self.opponent = opponent
         self.challenger = challenger
         self.channel = channel
+        self.duel_link = duel_link
+        self.supervisor = None
+        
+        self.add_item(SupervisorSelect())
+        
+        no_supervisor_btn = ui.Button(label="No Supervisor (Optional)", style=discord.ButtonStyle.secondary)
+        no_supervisor_btn.callback = self.no_supervisor_callback
+        self.add_item(no_supervisor_btn)
     
-    async def on_submit(self, interaction: discord.Interaction):
+    async def no_supervisor_callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        
-        duel_link = self.duel_link.value.strip()
-        
-        # Validate it's a URL
-        if not (duel_link.startswith("http://") or duel_link.startswith("https://")):
-            await interaction.followup.send(
-                embed=create_styled_embed(
-                    "Invalid Link",
-                    "Please provide a valid URL starting with http:// or https://",
-                    UIStyle.COLOR_ERROR
-                ),
-                ephemeral=True
-            )
-            return
-        
+        await self.proceed_with_challenge(interaction)
+    
+    async def proceed_with_challenge(self, interaction: discord.Interaction):
         # Send challenge to the channel
         def response_check(m: discord.Message):
             return (
@@ -892,9 +978,11 @@ class DuelLinkModal(ui.Modal, title="Enter Duel Link"):
                 and m.content.lower() in ("yes", "no", "y", "n", "accept", "decline")
             )
 
+        supervisor_text = f"\n**Supervising Officer:** {self.supervisor.mention}" if self.supervisor else ""
+        
         challenge_embed = create_styled_embed(
             "⚔️ Duel Challenge!",
-            f"{self.opponent.mention}, you have been challenged to a duel by {self.challenger.mention}!\n\n"
+            f"{self.opponent.mention}, you have been challenged to a duel by {self.challenger.mention}!{supervisor_text}\n\n"
             "**Respond with:**\n"
             "• `yes` or `accept` to accept the challenge\n"
             "• `no` or `decline` to decline\n\n"
@@ -931,22 +1019,42 @@ class DuelLinkModal(ui.Modal, title="Enter Duel Link"):
         accepted_embed = create_styled_embed(
             "✅ Challenge Accepted!",
             f"{self.opponent.mention} has accepted the duel!\n\n"
-            "📨 Both players will receive a DM with the duel link.",
+            "📨 Both players and the supervising officer will receive a DM with the duel link.",
             UIStyle.COLOR_SUCCESS
         )
         await self.channel.send(embed=accepted_embed)
 
-        # Send DM with custom duel link
-        for user in (self.challenger, self.opponent):
+        # Send DM to participants and supervisor
+        recipients = [self.challenger, self.opponent]
+        if self.supervisor:
+            recipients.append(self.supervisor)
+        
+        for user in recipients:
             try:
                 dm = await user.create_dm()
-                dm_embed = create_styled_embed(
-                    "⚔️ Duel Information",
-                    f"**Match:** {self.challenger.mention} vs {self.opponent.mention}\n\n"
-                    f"**Duel Link:** {duel_link}\n\n"
-                    "Good luck! May the best player win! 🎮",
-                    UIStyle.COLOR_PRIMARY
-                )
+                
+                if user == self.supervisor:
+                    # Special message for supervisor
+                    dm_embed = create_styled_embed(
+                        "👁️ Duel Supervision Request",
+                        f"You have been selected to supervise a duel!\n\n"
+                        f"**Challenger:** {self.challenger.mention}\n"
+                        f"**Challenged:** {self.opponent.mention}\n\n"
+                        f"**Duel Link:** {self.duel_link}\n\n"
+                        "Please join to observe and ensure fair play. 🛡️",
+                        UIStyle.COLOR_INFO
+                    )
+                else:
+                    # Message for participants
+                    supervisor_info = f"\n**Supervising Officer:** {self.supervisor.mention}" if self.supervisor else ""
+                    dm_embed = create_styled_embed(
+                        "⚔️ Duel Information",
+                        f"**Match:** {self.challenger.mention} vs {self.opponent.mention}{supervisor_info}\n\n"
+                        f"**Duel Link:** {self.duel_link}\n\n"
+                        "Good luck! May the best player win! 🎮",
+                        UIStyle.COLOR_PRIMARY
+                    )
+                
                 dm_embed.add_field(
                     name="📋 After the Duel",
                     value="An officer will use the menu to report the results.",
@@ -955,6 +1063,75 @@ class DuelLinkModal(ui.Modal, title="Enter Duel Link"):
                 await dm.send(embed=dm_embed)
             except Exception:
                 pass
+
+
+class SupervisorSelect(ui.UserSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Select supervising officer (optional)...",
+            min_values=1,
+            max_values=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        view: SupervisorSelectView = self.view
+        view.supervisor = self.values[0]
+        
+        await interaction.response.send_message(
+            embed=create_styled_embed(
+                "Supervisor Selected",
+                f"Supervising Officer: {view.supervisor.mention}\n\n"
+                "Proceeding with challenge...",
+                UIStyle.COLOR_SUCCESS
+            ),
+            ephemeral=True
+        )
+        
+        await view.proceed_with_challenge(interaction)
+
+
+class DuelLinkModal(ui.Modal, title="Enter Duel Link"):
+    """Modal for entering custom Roblox private server link"""
+    
+    duel_link = ui.TextInput(
+        label="Roblox Private Server Link",
+        placeholder="https://www.roblox.com/games/...",
+        required=True,
+        style=discord.TextStyle.short,
+        max_length=500
+    )
+    
+    def __init__(self, opponent: discord.Member, challenger: discord.User, channel: discord.TextChannel):
+        super().__init__()
+        self.opponent = opponent
+        self.challenger = challenger
+        self.channel = channel
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        duel_link = self.duel_link.value.strip()
+        
+        # Validate it's a URL
+        if not (duel_link.startswith("http://") or duel_link.startswith("https://")):
+            await interaction.response.send_message(
+                embed=create_styled_embed(
+                    "Invalid Link",
+                    "Please provide a valid URL starting with http:// or https://",
+                    UIStyle.COLOR_ERROR
+                ),
+                ephemeral=True
+            )
+            return
+        
+        # Now ask for supervising officer
+        await interaction.response.defer()
+        view = SupervisorSelectView(self.opponent, self.challenger, self.channel, duel_link)
+        embed = create_styled_embed(
+            "👁️ Select Supervising Officer",
+            "Select an officer to supervise this duel, or click 'No Supervisor' to continue without one.\n\n"
+            "The supervising officer will receive the duel link and can observe the match.",
+            UIStyle.COLOR_INFO
+        )
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 class ChallengeSelectView(ui.View):
@@ -1781,6 +1958,9 @@ async def progress_command(
     
     stats = await get_user_stats(member.id)
     embed = create_progress_embed(member, stats)
+    
+    # Check if user is eligible for promotion
+    await check_promotion_eligible(member, stats, ctx.guild)
     
     await loading_msg.edit(embed=embed)
 
